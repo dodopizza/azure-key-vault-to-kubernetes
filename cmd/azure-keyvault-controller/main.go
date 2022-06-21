@@ -71,6 +71,7 @@ func initConfig() {
 	viper.SetDefault("metrics_port", "9000")
 	viper.SetDefault("max_num_requeues", 5)
 	viper.SetDefault("num_threads", 1)
+	viper.SetDefault("sync_deleted_secrets", true)
 
 	viper.AutomaticEnv()
 }
@@ -197,8 +198,9 @@ func main() {
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: controllerAgentName})
 
 	options := &controller.Options{
-		MaxNumRequeues: viper.GetInt("max_num_requeues"),
-		NumThreads:     viper.GetInt("num_threads"),
+		MaxNumRequeues:     viper.GetInt("max_num_requeues"),
+		NumThreads:         viper.GetInt("num_threads"),
+		SyncDeletedSecrets: viper.GetBool("sync_deleted_secrets"),
 	}
 
 	controller := controller.NewController(

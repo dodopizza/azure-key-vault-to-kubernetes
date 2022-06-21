@@ -130,10 +130,11 @@ type Controller struct {
 
 // Options contains options for the controller
 type Options struct {
-	NumThreads     int
-	MaxNumRequeues int
-	ResyncPeriod   time.Duration
-	AkvsRef        corev1.ObjectReference
+	NumThreads         int
+	MaxNumRequeues     int
+	ResyncPeriod       time.Duration
+	AkvsRef            corev1.ObjectReference
+	SyncDeletedSecrets bool
 }
 
 // NewController returns a new AzureKeyVaultSecret controller
@@ -161,8 +162,11 @@ func NewController(client kubernetes.Interface, akvsClient akvcs.Interface, akvI
 	}
 
 	controller.akvsCrdQueue = queue.New("AzureKeyVaultSecrets", options.MaxNumRequeues, options.NumThreads, controller.syncAzureKeyVaultSecret)
-	controller.akvsCrdDeletionQueue = queue.New("DeletedAzureKeyVaultSecrets", options.MaxNumRequeues, options.NumThreads, controller.syncDeletedAzureKeyVaultSecret)
 	controller.azureKeyVaultQueue = queue.New("AzureKeyVault", options.MaxNumRequeues, options.NumThreads, controller.syncAzureKeyVault)
+
+	if controller.options.SyncDeletedSecrets {
+		controller.akvsCrdDeletionQueue = queue.New("DeletedAzureKeyVaultSecrets", options.MaxNumRequeues, options.NumThreads, controller.syncDeletedAzureKeyVaultSecret)
+	}
 
 	klog.InfoS("setting up event handlers")
 	controller.initAzureKeyVaultSecret()
@@ -199,8 +203,10 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 	klog.InfoS("starting azure key vault deleted secret queue")
 	c.akvsCrdDeletionQueue.Run(stopCh)
 
-	klog.InfoS("starting azure key vault queue")
-	c.azureKeyVaultQueue.Run(stopCh)
+	if c.options.SyncDeletedSecrets {
+		klog.InfoS("starting azure key vault queue")
+		c.azureKeyVaultQueue.Run(stopCh)
+	}
 
 	klog.InfoS("started workers")
 	<-stopCh
