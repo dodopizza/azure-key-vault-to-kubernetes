@@ -200,13 +200,13 @@ func (c *Controller) Run(stopCh <-chan struct{}) {
 	klog.InfoS("starting azure key vault secret queue")
 	c.akvsCrdQueue.Run(stopCh)
 
-	klog.InfoS("starting azure key vault deleted secret queue")
-	c.akvsCrdDeletionQueue.Run(stopCh)
-
 	if c.options.SyncDeletedSecrets {
-		klog.InfoS("starting azure key vault queue")
-		c.azureKeyVaultQueue.Run(stopCh)
+		klog.InfoS("starting azure key vault deleted secret queue")
+		c.akvsCrdDeletionQueue.Run(stopCh)
 	}
+
+	klog.InfoS("starting azure key vault queue")
+	c.azureKeyVaultQueue.Run(stopCh)
 
 	klog.InfoS("started workers")
 	<-stopCh
