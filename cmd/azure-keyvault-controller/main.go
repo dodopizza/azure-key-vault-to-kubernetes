@@ -24,8 +24,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/spf13/viper"
 
 	"github.com/gorilla/mux"
@@ -39,14 +41,17 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/record"
 
-	componentBaseConfig "k8s.io/component-base/config"
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	logConfig "k8s.io/component-base/logs/api/v1"
 	jsonlogs "k8s.io/component-base/logs/json"
 	"k8s.io/klog/v2"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	azlog "github.com/Azure/azure-sdk-for-go/sdk/azcore/log"
 	"github.com/SparebankenVest/azure-key-vault-to-kubernetes/cmd/azure-keyvault-controller/controller"
 	"github.com/SparebankenVest/azure-key-vault-to-kubernetes/pkg/akv2k8s"
+	"github.com/SparebankenVest/azure-key-vault-to-kubernetes/pkg/azure"
 	"github.com/SparebankenVest/azure-key-vault-to-kubernetes/pkg/azure/credentialprovider"
 	vault "github.com/SparebankenVest/azure-key-vault-to-kubernetes/pkg/azure/keyvault/client"
 	clientset "github.com/SparebankenVest/azure-key-vault-to-kubernetes/pkg/k8s/client/clientset/versioned"
@@ -57,12 +62,14 @@ import (
 const controllerAgentName = "azurekeyvaultcontroller"
 
 var (
-	version            string
-	kubeconfig         string
-	masterURL          string
-	cloudconfig        string
-	logFormat          string
-	watchAllNamespaces bool
+	version                   string
+	kubeconfig                string
+	masterURL                 string
+	cloudconfig               string
+	logFormat                 string
+	watchAllNamespaces        bool
+	kubeResyncPeriod          int
+	azureKeyVaultResyncPeriod int
 )
 
 func initConfig() {
@@ -85,6 +92,8 @@ func init() {
 	flag.StringVar(&masterURL, "master", "", "The address of the Kubernetes API server. Overrides any value in kubeconfig. Only required if out-of-cluster.")
 	flag.StringVar(&cloudconfig, "cloudconfig", "/etc/kubernetes/azure.json", "Path to cloud config. Only required if this is not at default location /etc/kubernetes/azure.json")
 	flag.BoolVar(&watchAllNamespaces, "watch-all-namespaces", true, "Watch for custom resources in all namespaces, if set to false it will only watch the runtime namespace.")
+	flag.IntVar(&kubeResyncPeriod, "kube-resync-period", 30, "Resync period for kubernetes changes, in seconds. Defaults to 30.")
+	flag.IntVar(&azureKeyVaultResyncPeriod, "azure-resync-period", 30, "Resync period for Azure Key Vault changes, in seconds. Defaults to 30.")
 }
 
 func main() {
@@ -96,7 +105,7 @@ func main() {
 
 	if logFormat == "json" {
 		loggerFactory := jsonlogs.Factory{}
-		logger, _ := loggerFactory.Create(componentBaseConfig.FormatOptions{})
+		logger, _ := loggerFactory.Create(logConfig.LoggingConfiguration{})
 		klog.SetLogger(logger)
 	}
 	klog.InfoS("log settings", "format", logFormat, "level", flag.Lookup("v").Value)
@@ -161,40 +170,49 @@ func main() {
 			options.LabelSelector = labelSelectorAppender(options.LabelSelector, objectLabelSet)
 		}))
 	}
-	kubeInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(kubeClient, time.Second*30, kubeInformerOptions...)
-	azureKeyVaultSecretInformerFactory := informers.NewSharedInformerFactoryWithOptions(azureKeyVaultSecretClient, time.Second*30, akvInformerOptions...)
+	kubeInformerFactory := kubeinformers.NewSharedInformerFactoryWithOptions(kubeClient, time.Second*time.Duration(kubeResyncPeriod), kubeInformerOptions...)
+	azureKeyVaultSecretInformerFactory := informers.NewSharedInformerFactoryWithOptions(azureKeyVaultSecretClient, time.Second*time.Duration(azureKeyVaultResyncPeriod), akvInformerOptions...)
 
 	klog.InfoS("Creating event broadcaster")
 	eventBroadcaster := record.NewBroadcaster()
 	eventBroadcaster.StartLogging(klog.V(6).Infof)
 	eventBroadcaster.StartRecordingToSink(&typedcorev1.EventSinkImpl{Interface: kubeClient.CoreV1().Events("")})
 
-	var vaultAuth credentialprovider.AzureKeyVaultCredentials
+	var token azcore.TokenCredential
+	klog.Infof("use `%s` as authType", authType)
 	switch authType {
 	case "azureCloudConfig":
-		vaultAuth, err = getCredentialsFromCloudConfig(cloudconfig)
+		token, err = getCredentialsFromCloudConfig(cloudconfig)
 		if err != nil {
 			klog.ErrorS(err, "failed to create cloud config provider for azure key vault", "file", cloudconfig)
 			os.Exit(1)
 		}
 	case "environment":
-		vaultAuth, err = getCredentialsFromEnvironment()
+		token, err = getCredentialsFromEnvironment()
 		if err != nil {
 			klog.ErrorS(err, "failed to create credentials provider from environment for azure key vault")
 			os.Exit(1)
 		}
+	case "environment-azidentity":
+		logLevel, _ := strconv.Atoi(flag.Lookup("v").Value.String())
+		if logLevel >= 4 {
+			azlog.SetListener(func(cls azlog.Event, msg string) {
+				klog.Infof(msg)
+			})
+		}
+		token, err = getCredentialsFromAzidentity()
+		if err != nil {
+			klog.ErrorS(err, "failed to create credentials provider from azidentity for azure key vault")
+			os.Exit(1)
+		}
+
 	default:
 		klog.ErrorS(nil, "auth type not supported", "type", authType)
 		os.Exit(1)
 	}
 
-	err = validateCredentials(vaultAuth)
-	if err != nil {
-		klog.ErrorS(err, "failed to get authorizer from azure key vault credentials")
-		os.Exit(1)
-	}
+	vaultService := vault.NewService(token)
 
-	vaultService := vault.NewService(vaultAuth)
 	recorder := eventBroadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: controllerAgentName})
 
 	options := &controller.Options{
@@ -213,12 +231,6 @@ func main() {
 		options)
 
 	controller.Run(stopCh)
-}
-
-func validateCredentials(credentials credentialprovider.Credentials) error {
-	klog.V(4).InfoS("checking credentials by getting authorizer")
-	_, err := credentials.Authorizer()
-	return err
 }
 
 func createMetricsServer(metricsPort string) {
@@ -248,7 +260,7 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func getCredentialsFromCloudConfig(cloudconfig string) (credentialprovider.AzureKeyVaultCredentials, error) {
+func getCredentialsFromCloudConfig(cloudconfig string) (azure.LegacyTokenCredential, error) {
 	f, err := os.Open(cloudconfig)
 	if err != nil {
 		return nil, fmt.Errorf("failed reading azure config from %s, error: %+v", cloudconfig, err)
@@ -257,17 +269,25 @@ func getCredentialsFromCloudConfig(cloudconfig string) (credentialprovider.Azure
 
 	cloudCnfProvider, err := credentialprovider.NewFromCloudConfig(f)
 	if err != nil {
-		return nil, fmt.Errorf("Failed reading azure config from %s, error: %+v", cloudconfig, err)
+		return nil, fmt.Errorf("failed reading azure config from %s, error: %+v", cloudconfig, err)
 	}
 
 	return cloudCnfProvider.GetAzureKeyVaultCredentials()
 }
 
-func getCredentialsFromEnvironment() (credentialprovider.AzureKeyVaultCredentials, error) {
+func getCredentialsFromEnvironment() (azure.LegacyTokenCredential, error) {
 	provider, err := credentialprovider.NewFromEnvironment()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create azure credentials provider, error: %+v", err)
 	}
 
+	return provider.GetAzureKeyVaultCredentials()
+}
+
+func getCredentialsFromAzidentity() (azure.LegacyTokenCredential, error) {
+	provider, err := credentialprovider.NewFromAzidentity()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create azure identity provider, error: %+v", err)
+	}
 	return provider.GetAzureKeyVaultCredentials()
 }

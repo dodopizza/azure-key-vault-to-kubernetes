@@ -3,7 +3,9 @@
 <p align="center">
 
   <a href="https://github.com/SparebankenVest/azure-key-vault-to-kubernetes/actions">
-    <img src="https://img.shields.io/github/workflow/status/sparebankenvest/azure-key-vault-to-kubernetes/build?style=flat&label=build" alt="Build Status">
+    <img src="https://img.shields.io/github/actions/workflow/status/sparebankenvest/azure-key-vault-to-kubernetes/controller-build.yaml?style=flat&label=Controller&branch=master" alt="Controller Build Status">
+    <img src="https://img.shields.io/github/actions/workflow/status/sparebankenvest/azure-key-vault-to-kubernetes/webhook-build.yaml?style=flat&label=WebHook&branch=master" alt="WebHook Build Status">
+    <img src="https://img.shields.io/github/actions/workflow/status/sparebankenvest/azure-key-vault-to-kubernetes/vaultenv-build.yaml?style=flat&label=VaultEnv&branch=master" alt="VaultEnv Build Status">
   </a>
 
   <a href="https://goreportcard.com/report/github.com/SparebankenVest/azure-key-vault-to-kubernetes">
@@ -31,8 +33,6 @@
 <p align="center"><i>Azure Key Vault to Kubernetes (akv2k8s) makes Azure Key Vault secrets, certificates and keys available to your applications in Kubernetes, in a simple and secure way.</i></p> 
 
 <p align="center"><i>Documentation available at <a href="https://akv2k8s.io">https://akv2k8s.io</a>. Join our <a href="https://join.slack.com/t/akv2k8s/shared_invite/zt-lfx2qdky-SGjwN8qTfca6bdeIyk46lg">Slack Workspace</a> to ask questions to the akv2k8s community.</i></p>
-
-<p align="center"><i>Please spare one minute to take our survey: <a href="https://www.surveymonkey.com/r/HMFZVYR">https://www.surveymonkey.com/r/HMFZVYR</a>. Why? We have no idea how many are using Akv2k8s, except through user interaction here on GitHub. More importantly - what can we do to make Akv2k8s even better?</i></p>
 
 ## Overview
 

@@ -1,6 +1,6 @@
 ARG BASEIMAGE=gcr.io/distroless/static:nonroot
-ARG BASE_ALPINE=alpine:3.15.4
-ARG GO_VERSION=1.18.1
+ARG BASE_ALPINE=alpine:3.17.2
+ARG GO_VERSION=1.20.0
 
 # -------
 # Builder
@@ -9,7 +9,7 @@ FROM golang:${GO_VERSION} AS base_builder
 ARG PACKAGE
 
 WORKDIR /go/src/${PACKAGE}
-ADD go.mod go.sum /go/src/${PACKAGE}
+ADD go.mod go.sum /go/src/${PACKAGE}/
 RUN go mod download
 
 FROM base_builder AS builder

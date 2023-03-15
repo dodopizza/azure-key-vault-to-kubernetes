@@ -21,18 +21,18 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	"github.com/SparebankenVest/azure-key-vault-to-kubernetes/cmd/azure-keyvault-secrets-webhook/auth"
 	"github.com/SparebankenVest/azure-key-vault-to-kubernetes/pkg/docker/registry"
 	"github.com/spf13/viper"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
@@ -201,18 +201,6 @@ func (p podWebHook) mutateContainers(ctx context.Context, containers []corev1.Co
 		}...)
 
 		if useAuthService {
-			_, err := p.clientset.CoreV1().Secrets(p.namespace).Create(context.TODO(), authServiceSecret, metav1.CreateOptions{})
-			if err != nil {
-				if errors.IsAlreadyExists(err) {
-					_, err = p.clientset.CoreV1().Secrets(p.namespace).Update(context.TODO(), authServiceSecret, metav1.UpdateOptions{})
-					if err != nil {
-						return false, err
-					}
-				} else {
-					return false, err
-				}
-			}
-
 			container.VolumeMounts = append(container.VolumeMounts, []corev1.VolumeMount{
 				{
 					Name:      authSecretVolumeName,
@@ -289,6 +277,21 @@ func (p podWebHook) mutatePodSpec(ctx context.Context, pod *corev1.Pod) error {
 		}
 	}
 
+	if p.useAuthService && (len(podSpec.InitContainers) > 0 || len(podSpec.Containers) > 0) {
+		klog.InfoS("create authentication service secret", klog.KRef(p.namespace, pod.Name))
+		_, err := p.clientset.CoreV1().Secrets(p.namespace).Create(context.TODO(), authServiceSecret, metav1.CreateOptions{})
+		if err != nil {
+			if errors.IsAlreadyExists(err) {
+				_, err = p.clientset.CoreV1().Secrets(p.namespace).Update(context.TODO(), authServiceSecret, metav1.UpdateOptions{})
+				if err != nil {
+					return err
+				}
+			} else {
+				return err
+			}
+		}
+	}
+
 	klog.InfoS("mutate init-containers", klog.KRef(p.namespace, pod.Name))
 	initContainersMutated, err := p.mutateContainers(ctx, podSpec.InitContainers, podSpec, authServiceSecret)
 	if err != nil {
@@ -318,7 +321,7 @@ func (p podWebHook) currentNamespace() string {
 		return ns
 	}
 
-	if data, err := ioutil.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
+	if data, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
 		if ns := strings.TrimSpace(string(data)); len(ns) > 0 {
 			return ns
 		}
