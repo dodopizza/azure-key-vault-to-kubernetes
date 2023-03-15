@@ -19,6 +19,7 @@ DOCKER_AUTH_SERVICE_IMAGE=azure-keyvault-auth-service
 DOCKER_VAULTENV_IMAGE=azure-keyvault-env
 DOCKER_AKV2K8S_TEST_IMAGE=akv2k8s-env-test
 
+DOCKER_PLATFORM = linux/amd64
 DOCKER_INTERNAL_TAG := $(shell git rev-parse --short HEAD)
 DOCKER_RELEASE_TAG := $(shell git describe --tags)
 DOCKER_RELEASE_TAG_WEBHOOK := $(shell echo $(DOCKER_RELEASE_TAG) | sed s/"webhook-"/""/g)
@@ -221,6 +222,7 @@ image-webhook:
 	DOCKER_BUILDKIT=1 docker build \
 		--progress=plain \
 		--target webhook \
+		--platform $(DOCKER_PLATFORM) \
 		--build-arg BUILD_SUB_TARGET="-webhook" \
 		--build-arg PACKAGE=$(PACKAGE) \
 		--build-arg VCS_REF=$(DOCKER_INTERNAL_TAG) \
@@ -233,6 +235,7 @@ image-controller:
 	DOCKER_BUILDKIT=1 docker build \
 		--progress=plain \
 		--target controller \
+		--platform $(DOCKER_PLATFORM) \
 		--build-arg BUILD_SUB_TARGET="-controller" \
 		--build-arg PACKAGE=$(PACKAGE) \
 		--build-arg VCS_REF=$(DOCKER_INTERNAL_TAG) \
@@ -245,6 +248,7 @@ image-vaultenv:
 	DOCKER_BUILDKIT=1 docker build \
 		--progress=plain \
 		--target vaultenv \
+		--platform $(DOCKER_PLATFORM) \
 		--build-arg BUILD_SUB_TARGET="-vaultenv" \
 		--build-arg PACKAGE=$(PACKAGE) \
 		--build-arg VCS_REF=$(DOCKER_INTERNAL_TAG) \
